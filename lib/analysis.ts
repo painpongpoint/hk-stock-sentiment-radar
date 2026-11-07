@@ -173,7 +173,7 @@ export function analyze(input: {
     },
     news: input.news.slice(0, 8), sources: input.sources,
     limitations: [
-      'V1 使用可解釋的中文詞典與規則式分析，尚未接入大型語言模型。',
+      'V2 使用可解釋的中文詞典與規則式分析，尚未接入大型語言模型。',
       '論壇用戶不代表整體市場，留言可能包含反諷、廣告或重複帳戶。',
       '短線方向未經完整回測，並非交易訊號或投資建議。',
     ],
