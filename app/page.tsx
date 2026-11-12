@@ -112,7 +112,7 @@ export default function Home() {
       <header className="site-header"><a className="brand" href="#top" aria-label="港股情緒雷達首頁"><span className="brand-mark">港</span><span><strong>港股情緒雷達</strong><small>MARKET SENTIMENT LAB</small></span></a><Badge variant="outline" className="live-badge"><span className="live-dot" /> OFFICIAL API BRANCH</Badge></header>
 
       <section className="workspace-shell" id="top">
-        <div className="intro-copy"><Badge variant="outline" className="section-badge"><Activity data-icon="inline-start" /> SECONDARY MARKET INTELLIGENCE</Badge><h1>從市場雜音中，<span>看見情緒轉向。</span></h1><p>整合富途官方社區 API、公開論壇與價格變化，分析當天及前兩日市場情緒。</p></div>
+        <div className="intro-copy"><Badge variant="outline" className="section-badge"><Activity data-icon="inline-start" /> SECONDARY MARKET INTELLIGENCE</Badge><h1>從市場雜音中，<span>看見情緒轉向。</span></h1><p>快速整合富途官方社區 API 與價格變化，分析當天及前兩日市場情緒。</p></div>
 
         <section className={`futu-connect-card state-${futuApiState}`} aria-label="富途牛牛官方社區 API">
           <div className="futu-connect-main">
@@ -141,7 +141,7 @@ export default function Home() {
         <form className="stock-search" aria-label="港股分析搜尋" onSubmit={runAnalysis}>
           <label htmlFor="stock-code">港股編號</label>
           <div className="search-controls"><div className="stock-input-wrap"><span>HK</span><Input id="stock-code" name="code" inputMode="numeric" maxLength={5} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} aria-describedby="search-note" /></div><Button type="submit" size="lg" className="analyze-button" disabled={loading}>{loading ? <LoaderCircle className="spin" data-icon="inline-start" /> : <Search data-icon="inline-start" />}{loading ? '正在抓取官方 API…' : '抓取及分析'} <ArrowUpRight data-icon="inline-end" /></Button></div>
-          <div className="search-footer" id="search-note"><span>常用：{[['00700', '騰訊'], ['09988', '阿里'], ['01810', '小米']].map(([value, label], index) => <button type="button" onClick={() => setCode(value)} key={value}>{index ? ' · ' : ''}{value} {label}</button>)}</span><span><ShieldCheck size={13} /> 富途官方 API＋其他公開來源</span></div>
+          <div className="search-footer" id="search-note"><span>常用：{[['00700', '騰訊'], ['09988', '阿里'], ['01810', '小米']].map(([value, label], index) => <button type="button" onClick={() => setCode(value)} key={value}>{index ? ' · ' : ''}{value} {label}</button>)}</span><span><ShieldCheck size={13} /> 富途官方 API＋快速行情</span></div>
           {error && <div className="error-banner" role="alert"><CircleAlert size={16} />{error}<button type="button" onClick={() => runAnalysis(undefined, code, 'demo')}>改看示例</button></div>}
         </form>
 

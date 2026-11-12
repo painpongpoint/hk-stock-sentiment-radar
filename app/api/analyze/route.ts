@@ -7,6 +7,15 @@ import type { AnalysisResult } from '@/lib/types';
 export const dynamic = 'force-dynamic';
 
 const cache = new Map<string, { expires: number; data: AnalysisResult }>();
+const inFlight = new Map<string, Promise<AnalysisResult>>();
+
+function responseHeaders(cacheState: 'HIT' | 'MISS', startedAt: number) {
+  return {
+    'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=300',
+    'Server-Timing': `analysis;dur=${Date.now() - startedAt}`,
+    'X-Data-Cache': cacheState,
+  };
+}
 
 function normalizeCode(value: string | null) {
   const cleaned = String(value ?? '').trim().toUpperCase().replace(/^HK\./, '').replace(/\.HK$/, '');
@@ -15,6 +24,7 @@ function normalizeCode(value: string | null) {
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
   try {
     const url = new URL(request.url);
     const code = normalizeCode(url.searchParams.get('code'));
@@ -22,12 +32,21 @@ export async function GET(request: Request) {
     const cacheKey = `${code}:${mode}`;
     const cached = cache.get(cacheKey);
     if (cached && cached.expires > Date.now()) {
-      return NextResponse.json(cached.data, { headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=240', 'X-Data-Cache': 'HIT' } });
+      return NextResponse.json(cached.data, { headers: responseHeaders('HIT', startedAt) });
     }
-    const bundle = mode === 'demo' ? demoBundle(code) : await liveBundle(code);
-    const data = analyze(bundle);
+    let task = inFlight.get(cacheKey);
+    if (!task) {
+      task = (async () => analyze(mode === 'demo' ? demoBundle(code) : await liveBundle(code)))();
+      inFlight.set(cacheKey, task);
+    }
+    let data: AnalysisResult;
+    try {
+      data = await task;
+    } finally {
+      if (inFlight.get(cacheKey) === task) inFlight.delete(cacheKey);
+    }
     cache.set(cacheKey, { expires: Date.now() + 5 * 60_000, data });
-    return NextResponse.json(data, { headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=240', 'X-Data-Cache': 'MISS' } });
+    return NextResponse.json(data, { headers: responseHeaders('MISS', startedAt) });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : '分析暫時失敗，請稍後再試。' }, { status: 400 });
   }

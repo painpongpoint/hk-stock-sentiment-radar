@@ -96,7 +96,7 @@ async function marketSource(code: string) {
   const number = String(Number(code)).padStart(Number(code) <= 9999 ? 4 : 5, '0');
   const symbol = `${number}.HK`;
   try {
-    const response = await fetchWithTimeout(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1mo&interval=1d`, { headers: { ...HEADERS, Accept: 'application/json' } }, 9_000);
+    const response = await fetchWithTimeout(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1mo&interval=1d`, { headers: { ...HEADERS, Accept: 'application/json' } }, 4_000);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json() as any;
     const result = payload?.chart?.result?.[0];
@@ -157,7 +157,7 @@ function walkNews(value: unknown, output: any[]) {
 
 async function futuSource(code: string) {
   try {
-    const response = await fetchWithTimeout(`https://www.futunn.com/stock/${code}-HK`, { headers: HEADERS }, 12_000);
+    const response = await fetchWithTimeout(`https://www.futunn.com/stock/${code}-HK`, { headers: HEADERS }, 3_000);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const state = extractJson(await response.text(), 'window.__INITIAL_STATE__=') as any;
     const companyName = normalizeCompanyName(String(state?.stock_info?.name ?? ''));
@@ -185,7 +185,7 @@ async function futuCommunitySource(code: string) {
         Accept: 'application/json',
         'User-Agent': 'hk-stock-sentiment-radar/2.2 (Futu official community API)',
       },
-    }, 12_000);
+    }, 5_000);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json() as { code?: number; message?: string; data?: unknown[] };
     if (payload.code !== 0) throw new Error(payload.message || `API code ${payload.code ?? 'unknown'}`);
@@ -278,16 +278,25 @@ export function demoBundle(code: string): SourceBundle {
 }
 
 export async function liveBundle(code: string): Promise<SourceBundle> {
-  const [market, eastmoney, futu, futuCommunity, xueqiu] = await Promise.all([
+  // The official community API is the primary source on this branch. Eastmoney
+  // and Xueqiu frequently wait until their anti-bot timeout and return no usable
+  // records, so they must not delay the first analysis response.
+  const [market, futu, futuCommunity] = await Promise.all([
     marketSource(code),
-    eastmoneySource(code),
     futuSource(code),
     futuCommunitySource(code),
-    xueqiuSource(code),
   ]);
+  const eastmoneyStatus: SourceStatus = {
+    key: 'eastmoney', label: '東方財富股吧', ok: false, count: 0,
+    message: '快速模式未等待此來源，避免不穩定接口拖慢分析',
+  };
+  const xueqiuStatus: SourceStatus = {
+    key: 'xueqiu', label: '雪球', ok: false, count: 0,
+    message: '快速模式未等待此來源，避免反自動化檢查拖慢分析',
+  };
   return {
     code, mode: 'live', companyName: futu.companyName || market.companyName || `港股 ${code}`,
-    market: market.market, posts: [...futuCommunity.posts, ...eastmoney.posts, ...xueqiu.posts], news: futu.news,
-    sources: [market.status, futuCommunity.status, eastmoney.status, xueqiu.status, futu.status],
+    market: market.market, posts: futuCommunity.posts, news: futu.news,
+    sources: [market.status, futuCommunity.status, eastmoneyStatus, xueqiuStatus, futu.status],
   };
 }
