@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { analyze } from '@/lib/analysis';
 import { demoBundle, liveBundle } from '@/lib/sources';
-import type { AnalysisProgress } from '@/lib/sources';
+import type { AnalysisProgress, CrawlDepth } from '@/lib/sources';
 import type { AnalysisResult } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -27,9 +27,10 @@ function normalizeCode(value: string | null) {
 async function resolveAnalysis(
   code: string,
   mode: 'live' | 'demo',
+  depth: CrawlDepth,
   onProgress?: (progress: AnalysisProgress) => void,
 ) {
-  const cacheKey = `${code}:${mode}`;
+  const cacheKey = `${code}:${mode}:${depth}`;
   const cached = cache.get(cacheKey);
   if (cached && cached.expires > Date.now()) {
     onProgress?.({ percent: 100, message: '已載入最近分析結果' });
@@ -41,7 +42,7 @@ async function resolveAnalysis(
     task = (async () => {
       const bundle = mode === 'demo'
         ? demoBundle(code)
-        : await liveBundle(code, onProgress);
+        : await liveBundle(code, onProgress, depth);
       onProgress?.({ percent: 92, message: '正在計算情緒、熱門議題與短線趨勢…' });
       return analyze(bundle);
     })();
@@ -61,7 +62,7 @@ async function resolveAnalysis(
   return { data, cacheState: 'MISS' as const };
 }
 
-function streamAnalysis(code: string, mode: 'live' | 'demo') {
+function streamAnalysis(code: string, mode: 'live' | 'demo', depth: CrawlDepth) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -70,7 +71,7 @@ function streamAnalysis(code: string, mode: 'live' | 'demo') {
       };
       try {
         send({ type: 'progress', percent: 6, message: '正在準備分析範圍…' });
-        const result = await resolveAnalysis(code, mode, (progress) => send({ type: 'progress', ...progress }));
+        const result = await resolveAnalysis(code, mode, depth, (progress) => send({ type: 'progress', ...progress }));
         send({ type: 'result', data: result.data, cache: result.cacheState });
       } catch (error) {
         send({ type: 'error', message: error instanceof Error ? error.message : '分析暫時失敗，請稍後再試。' });
@@ -94,8 +95,9 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const code = normalizeCode(url.searchParams.get('code'));
     const mode = url.searchParams.get('mode') === 'demo' ? 'demo' : 'live';
-    if (url.searchParams.get('stream') === '1') return streamAnalysis(code, mode);
-    const result = await resolveAnalysis(code, mode);
+    const depth: CrawlDepth = url.searchParams.get('depth') === 'deep' ? 'deep' : 'normal';
+    if (url.searchParams.get('stream') === '1') return streamAnalysis(code, mode, depth);
+    const result = await resolveAnalysis(code, mode, depth);
     return NextResponse.json(result.data, { headers: responseHeaders(result.cacheState, startedAt) });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : '分析暫時失敗，請稍後再試。' }, { status: 400 });

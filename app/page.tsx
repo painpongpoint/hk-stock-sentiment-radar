@@ -62,6 +62,7 @@ export default function Home() {
   const [error, setError] = useState('');
   const [hasRun, setHasRun] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState({ percent: 0, message: '等待開始' });
+  const [crawlDepth, setCrawlDepth] = useState<'normal' | 'deep'>('normal');
 
   const metrics = useMemo(() => [
     { label: '最新價格', value: result.market.latestPrice == null ? '未取得' : `HK$ ${result.market.latestPrice.toFixed(2)}`, note: result.market.changePct == null ? result.market.trend : `三日 ${formatSigned(result.market.changePct, '%')}`, up: (result.market.changePct ?? 0) >= 0 },
@@ -92,7 +93,7 @@ export default function Home() {
     setCode(normalized); setLoading(true); setError('');
     setAnalysisProgress({ percent: 2, message: '正在建立分析工作…' });
     try {
-      const response = await fetch(`/api/analyze?code=${encodeURIComponent(normalized)}&mode=${mode}&stream=1`);
+      const response = await fetch(`/api/analyze?code=${encodeURIComponent(normalized)}&mode=${mode}&depth=${crawlDepth}&stream=1`);
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.error ?? '分析暫時失敗。');
@@ -176,13 +177,21 @@ export default function Home() {
         </section>
 
         <form className="stock-search" aria-label="港股分析搜尋" onSubmit={runAnalysis}>
+          <div className="crawl-mode-selector" aria-label="抓取模式">
+            <button type="button" className={crawlDepth === 'normal' ? 'active' : ''} aria-pressed={crawlDepth === 'normal'} disabled={loading} onClick={() => setCrawlDepth('normal')}>
+              <span>普通抓取</span><small>富途 50 條 · 東財 4 頁</small>
+            </button>
+            <button type="button" className={crawlDepth === 'deep' ? 'active' : ''} aria-pressed={crawlDepth === 'deep'} disabled={loading} onClick={() => setCrawlDepth('deep')}>
+              <span>深度抓取</span><small>富途 50 條上限 · 東財 10 頁</small>
+            </button>
+          </div>
           <label htmlFor="stock-code">港股編號</label>
           <div className="search-controls"><div className="stock-input-wrap"><span>HK</span><Input id="stock-code" name="code" inputMode="numeric" maxLength={5} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} aria-describedby="search-note" /></div><Button type="submit" size="lg" className="analyze-button" disabled={loading}>{loading ? <LoaderCircle className="spin" data-icon="inline-start" /> : <Search data-icon="inline-start" />}{loading ? '正在抓取官方 API…' : '抓取及分析'} <ArrowUpRight data-icon="inline-end" /></Button></div>
           <div className="search-footer" id="search-note"><span>常用：{[['00700', '騰訊'], ['09988', '阿里'], ['01810', '小米']].map(([value, label], index) => <button type="button" onClick={() => setCode(value)} key={value}>{index ? ' · ' : ''}{value} {label}</button>)}</span><span><ShieldCheck size={13} /> 富途官方 API＋其他公開來源</span></div>
           {loading && <div className="analysis-progress" role="status" aria-live="polite">
             <div className="analysis-progress-heading"><span><LoaderCircle className="spin" size={15} />{analysisProgress.message}</span><b>{analysisProgress.percent}%</b></div>
             <Progress value={analysisProgress.percent} aria-label={`分析進度 ${analysisProgress.percent}%`} />
-            <small>近三日 · 富途最多 50 條 · 東方財富最多 4 頁 · 雪球已略過</small>
+            <small>近三日 · {crawlDepth === 'deep' ? '深度抓取：富途 50 條上限、東方財富最多 10 頁' : '普通抓取：富途 50 條、東方財富最多 4 頁'} · 雪球已略過</small>
           </div>}
           {error && <div className="error-banner" role="alert"><CircleAlert size={16} />{error}<button type="button" onClick={() => runAnalysis(undefined, code, 'demo')}>改看示例</button></div>}
         </form>

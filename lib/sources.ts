@@ -21,6 +21,7 @@ export type AnalysisProgress = {
 };
 
 type ProgressListener = (progress: AnalysisProgress) => void;
+export type CrawlDepth = 'normal' | 'deep';
 
 function fetchWithTimeout(url: string, init: RequestInit = {}, timeout = 10_000) {
   const controller = new AbortController();
@@ -122,15 +123,17 @@ async function marketSource(code: string) {
   }
 }
 
-async function eastmoneySource(code: string) {
+async function eastmoneySource(code: string, maxPages = 4, onPage?: (page: number, maxPages: number) => void) {
   const cutoff = hkDay(new Date(Date.now() - 2 * 86_400_000));
   const found = new Map<string, ForumPost>();
+  let pagesRead = 0;
   try {
-    for (let page = 1; page <= 4; page += 1) {
+    for (let page = 1; page <= maxPages; page += 1) {
       const params = new URLSearchParams({
         code: `hk${code}`,
         type: '0',
-        index: String(page),
+        index: '1',
+        p: String(page),
         pageSize: '50',
         deviceid: '100',
         version: '200',
@@ -148,6 +151,7 @@ async function eastmoneySource(code: string) {
       const data = await response.json() as any;
       const records = Array.isArray(data?.re) ? data.re : [];
       if (!records.length && page === 1) throw new Error('API 沒有回傳討論');
+      pagesRead = page;
       let recent = 0;
       for (const item of records) {
         if (item?.post_type !== 0) continue;
@@ -161,10 +165,11 @@ async function eastmoneySource(code: string) {
         });
         recent += 1;
       }
+      onPage?.(page, maxPages);
       if (page >= 2 && recent === 0) break;
     }
     const posts = [...found.values()].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
-    return { posts, status: { key: 'eastmoney', label: '東方財富股吧', ok: posts.length > 0, count: posts.length, message: posts.length ? `已取得近三日 ${posts.length} 條用戶討論` : '近三日沒有可用討論' } satisfies SourceStatus };
+    return { posts, status: { key: 'eastmoney', label: '東方財富股吧', ok: posts.length > 0, count: posts.length, message: posts.length ? `已讀取 ${pagesRead} 頁，取得近三日 ${posts.length} 條用戶討論` : `已讀取 ${pagesRead} 頁，近三日沒有可用討論` } satisfies SourceStatus };
   } catch (error) {
     return { posts: [] as ForumPost[], status: { key: 'eastmoney', label: '東方財富股吧', ok: false, count: 0, message: `暫時無法讀取：${error instanceof Error ? error.message : '未知錯誤'}` } satisfies SourceStatus };
   }
@@ -239,7 +244,7 @@ async function futuCommunitySource(code: string) {
         label: '富途官方社區 API',
         ok: posts.length > 0,
         count: posts.length,
-        message: posts.length ? `官方 stock_feed API 已取得近三日 ${posts.length} 條討論` : '官方 API 暫未回傳近三日討論',
+        message: posts.length ? `官方 stock_feed API 已取得近三日 ${posts.length} 條討論（接口上限 50）` : '官方 API 暫未回傳近三日討論',
       } satisfies SourceStatus,
     };
   } catch (error) {
@@ -301,7 +306,7 @@ export function demoBundle(code: string): SourceBundle {
   ] };
 }
 
-export async function liveBundle(code: string, onProgress?: ProgressListener): Promise<SourceBundle> {
+export async function liveBundle(code: string, onProgress?: ProgressListener, depth: CrawlDepth = 'normal'): Promise<SourceBundle> {
   // Keep every configured source except Xueqiu in the live collection. Xueqiu's
   // public endpoint is skipped because its anti-bot response is not usable.
   let completedSources = 0;
@@ -314,10 +319,17 @@ export async function liveBundle(code: string, onProgress?: ProgressListener): P
     });
     return result;
   };
-  onProgress?.({ percent: 14, message: '正在並行抓取 4 個資料來源…' });
+  const maxEastmoneyPages = depth === 'deep' ? 10 : 4;
+  const depthLabel = depth === 'deep' ? '深度抓取' : '普通抓取';
+  onProgress?.({ percent: 14, message: `${depthLabel}：正在並行處理 4 個資料來源…` });
   const [market, eastmoney, futu, futuCommunity] = await Promise.all([
     track('市場行情', marketSource(code)),
-    track('東方財富股吧', eastmoneySource(code)),
+    track('東方財富股吧', eastmoneySource(code, maxEastmoneyPages, (page, total) => {
+      onProgress?.({
+        percent: 14 + completedSources * 16,
+        message: `${depthLabel}：東方財富已讀取第 ${page}/${total} 頁`,
+      });
+    })),
     track('富途資訊', futuSource(code)),
     track('富途官方討論', futuCommunitySource(code)),
   ]);
