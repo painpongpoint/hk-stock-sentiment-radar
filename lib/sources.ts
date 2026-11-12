@@ -120,10 +120,27 @@ async function eastmoneySource(code: string) {
   const found = new Map<string, ForumPost>();
   try {
     for (let page = 1; page <= 4; page += 1) {
-      const response = await fetchWithTimeout(`https://guba.eastmoney.com/list,hk${code},f_${page}.html`, { headers: HEADERS }, 9_000);
+      const params = new URLSearchParams({
+        code: `hk${code}`,
+        type: '0',
+        index: String(page),
+        pageSize: '50',
+        deviceid: '100',
+        version: '200',
+        product: 'Guba',
+        plat: 'Web',
+      });
+      const response = await fetchWithTimeout(`https://gbapi.eastmoney.com/webarticlelist/api/Article/Articlelist?${params.toString()}`, {
+        headers: {
+          ...HEADERS,
+          Accept: 'application/json',
+          Referer: `https://guba.eastmoney.com/list,hk${code}.html`,
+        },
+      }, 5_000);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = extractJson(await response.text(), 'var article_list=') as any;
+      const data = await response.json() as any;
       const records = Array.isArray(data?.re) ? data.re : [];
+      if (!records.length && page === 1) throw new Error('API 沒有回傳討論');
       let recent = 0;
       for (const item of records) {
         if (item?.post_type !== 0) continue;
@@ -278,25 +295,21 @@ export function demoBundle(code: string): SourceBundle {
 }
 
 export async function liveBundle(code: string): Promise<SourceBundle> {
-  // The official community API is the primary source on this branch. Eastmoney
-  // and Xueqiu frequently wait until their anti-bot timeout and return no usable
-  // records, so they must not delay the first analysis response.
-  const [market, futu, futuCommunity] = await Promise.all([
+  // Keep every configured source except Xueqiu in the live collection. Xueqiu's
+  // public endpoint is skipped because its anti-bot response is not usable.
+  const [market, eastmoney, futu, futuCommunity] = await Promise.all([
     marketSource(code),
+    eastmoneySource(code),
     futuSource(code),
     futuCommunitySource(code),
   ]);
-  const eastmoneyStatus: SourceStatus = {
-    key: 'eastmoney', label: '東方財富股吧', ok: false, count: 0,
-    message: '快速模式未等待此來源，避免不穩定接口拖慢分析',
-  };
   const xueqiuStatus: SourceStatus = {
     key: 'xueqiu', label: '雪球', ok: false, count: 0,
-    message: '快速模式未等待此來源，避免反自動化檢查拖慢分析',
+    message: '按目前設定略過：公開接口的反自動化回應無法可靠分析',
   };
   return {
     code, mode: 'live', companyName: futu.companyName || market.companyName || `港股 ${code}`,
-    market: market.market, posts: futuCommunity.posts, news: futu.news,
-    sources: [market.status, futuCommunity.status, eastmoneyStatus, xueqiuStatus, futu.status],
+    market: market.market, posts: [...futuCommunity.posts, ...eastmoney.posts], news: futu.news,
+    sources: [market.status, futuCommunity.status, eastmoney.status, xueqiuStatus, futu.status],
   };
 }
