@@ -1,4 +1,4 @@
-# Cloudflare production branch: v2
+# Cloudflare production branch: v2 (deployment enabled)
 packages:
   - '.'
 
