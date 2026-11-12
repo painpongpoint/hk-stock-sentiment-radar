@@ -1,10 +1,10 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import {
   Activity, ArrowDownRight, ArrowUpRight, CheckCircle2, CircleAlert, Database,
-  Download, ExternalLink, FileText, LoaderCircle, LogIn, MonitorUp, PlugZap,
-  RefreshCw, Search, ShieldCheck, Sparkles, TrendingUp, WifiOff,
+  Download, ExternalLink, FileText, LoaderCircle, MonitorUp,
+  Search, ShieldCheck, Sparkles, TrendingUp, WifiOff,
 } from 'lucide-react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 
@@ -29,37 +29,11 @@ const SAMPLE: AnalysisResult = {
     negative: [{ id: '2', title: '成交放大但股價偏弱，短線仍要小心上方壓力', author: '趨勢交易者', publishedAt: '2026-10-29T03:30:00Z', source: '示例討論', url: '#', comments: 5, views: 201, sentiment: '負面', score: -0.63 }], recent: [],
   },
   news: [],
-  sources: [{ key: 'market', label: '市場行情', ok: true, count: 8, message: '最近交易日行情' }, { key: 'eastmoney', label: '公開論壇', ok: true, count: 196, message: '近三日公開討論' }, { key: 'xueqiu', label: '雪球', ok: false, count: 0, message: '公開接口可能受限' }, { key: 'futu', label: '富途牛牛', ok: true, count: 12, message: '近期新聞脈絡' }],
+  sources: [{ key: 'market', label: '市場行情', ok: true, count: 8, message: '最近交易日行情' }, { key: 'futu-community', label: '富途官方社區 API', ok: true, count: 50, message: '官方 API 即時討論' }, { key: 'eastmoney', label: '公開論壇', ok: true, count: 196, message: '近三日公開討論' }, { key: 'xueqiu', label: '雪球', ok: false, count: 0, message: '公開接口可能受限' }, { key: 'futu', label: '富途牛牛', ok: true, count: 12, message: '近期新聞脈絡' }],
   limitations: ['V2 使用可解釋的中文詞典與規則式分析。', '論壇用戶不代表整體市場。', '短線方向並非交易訊號。'], report: '',
 };
 
 const chartConfig = { close: { label: '收市價', color: '#c8ff45' }, sentimentIndex: { label: '情緒指數', color: '#56d6ae' } };
-const CONNECTOR_URL = 'http://127.0.0.1:8766';
-
-type ConnectorState = 'checking' | 'unavailable' | 'service-ready' | 'login-open' | 'connected' | 'scraping' | 'error';
-type ConnectorStatus = {
-  ok: boolean;
-  state: ConnectorState;
-  browserOpen?: boolean;
-  loginConfirmed?: boolean;
-  message?: string;
-  posts?: ForumPost[];
-  count?: number;
-  error?: string;
-};
-
-async function connectorRequest(path: string, init?: RequestInit, timeout = 6_000): Promise<ConnectorStatus> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(`${CONNECTOR_URL}${path}`, { ...init, mode: 'cors', cache: 'no-store', signal: controller.signal });
-    const payload = await response.json() as ConnectorStatus;
-    if (!response.ok) throw new Error(payload.error || payload.message || '本機連接器回應錯誤');
-    return payload;
-  } finally {
-    window.clearTimeout(timer);
-  }
-}
 
 function formatSigned(value: number | null, suffix = '') {
   if (value == null) return '—';
@@ -87,11 +61,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [hasRun, setHasRun] = useState(false);
-  const [connectorState, setConnectorState] = useState<ConnectorState>('checking');
-  const [connectorMessage, setConnectorMessage] = useState('正在檢查 Windows 本機連接器…');
-  const [futuCount, setFutuCount] = useState(0);
-
-  useEffect(() => { void checkConnector(true); }, []);
 
   const metrics = useMemo(() => [
     { label: '最新價格', value: result.market.latestPrice == null ? '未取得' : `HK$ ${result.market.latestPrice.toFixed(2)}`, note: result.market.changePct == null ? result.market.trend : `三日 ${formatSigned(result.market.changePct, '%')}`, up: (result.market.changePct ?? 0) >= 0 },
@@ -105,43 +74,14 @@ export default function Home() {
     [result],
   );
 
-  async function checkConnector(quiet = false) {
-    if (!quiet) setConnectorState('checking');
-    try {
-      const status = await connectorRequest('/health');
-      const state = status.loginConfirmed ? 'connected' : status.browserOpen ? 'login-open' : 'service-ready';
-      setConnectorState(state);
-      setConnectorMessage(status.loginConfirmed ? '富途本機登入已確認，可以同步最新討論。' : status.browserOpen ? '官方富途登入頁已開啟；完成登入後返回這裡確認。' : '本機連接器已啟動，下一步開啟富途官方登入。');
-    } catch {
-      setConnectorState('unavailable');
-      setConnectorMessage('尚未偵測到本機連接器。下載並啟動後，再按重新檢查。');
-    }
-  }
-
-  async function openFutuLogin() {
-    setConnectorState('checking');
-    setConnectorMessage('正在開啟富途官方登入頁…');
-    try {
-      await connectorRequest('/open-login', { method: 'POST' }, 55_000);
-      setConnectorState('login-open');
-      setConnectorMessage('請在新 Chrome 視窗完成富途登入及驗證，密碼不會傳到本網站。');
-    } catch (reason) {
-      setConnectorState('error');
-      setConnectorMessage(reason instanceof Error ? reason.message : '未能開啟富途登入頁。');
-    }
-  }
-
-  async function confirmFutuLogin() {
-    setConnectorState('checking');
-    try {
-      await connectorRequest('/confirm-login', { method: 'POST' });
-      setConnectorState('connected');
-      setConnectorMessage('登入已確認；開始分析時會由本機瀏覽器同步富途最新討論。');
-    } catch (reason) {
-      setConnectorState('error');
-      setConnectorMessage(reason instanceof Error ? reason.message : '未能確認登入。');
-    }
-  }
+  const futuApiSource = useMemo(() => result.sources.find((source) => source.key === 'futu-community'), [result]);
+  const futuCount = hasRun ? (futuApiSource?.count ?? 0) : 0;
+  const futuApiState = loading ? 'scraping' : hasRun && futuApiSource?.ok ? 'connected' : hasRun ? 'error' : 'service-ready';
+  const futuApiMessage = loading
+    ? `正在向富途官方社區 API 查詢 HK ${code.padStart(5, '0')}…`
+    : hasRun
+      ? (futuApiSource?.message ?? '本次沒有收到富途官方 API 資料。')
+      : '直接呼叫富途官方 stock_feed API，無需開啟登入頁、安裝連接器或擴充功能。';
 
   async function runAnalysis(event?: FormEvent, requestedCode = code, mode: 'live' | 'demo' = 'live') {
     event?.preventDefault();
@@ -150,26 +90,7 @@ export default function Home() {
     const normalized = cleaned.padStart(5, '0');
     setCode(normalized); setLoading(true); setError('');
     try {
-      let futuPosts: ForumPost[] = [];
-      if (mode === 'live' && connectorState === 'connected') {
-        setConnectorState('scraping');
-        setConnectorMessage(`正在從富途登入頁整理 HK ${normalized} 最新討論…`);
-        try {
-          const local = await connectorRequest('/scrape', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: normalized }),
-          }, 75_000);
-          futuPosts = local.posts ?? [];
-          setFutuCount(futuPosts.length);
-          setConnectorState('connected');
-          setConnectorMessage(futuPosts.length ? `已同步 ${futuPosts.length} 條富途最新討論。` : (local.message || '本次未識別到富途討論，已繼續分析其他來源。'));
-        } catch (reason) {
-          setConnectorState('error');
-          setConnectorMessage(`${reason instanceof Error ? reason.message : '富途抓取失敗'}；本次已改用其他公開來源。`);
-        }
-      }
-      const response = futuPosts.length
-        ? await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: normalized, mode, futuPosts }) })
-        : await fetch(`/api/analyze?code=${encodeURIComponent(normalized)}&mode=${mode}`);
+      const response = await fetch(`/api/analyze?code=${encodeURIComponent(normalized)}&mode=${mode}`);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? '分析暫時失敗。');
       setResult(payload); setHasRun(true);
@@ -188,43 +109,39 @@ export default function Home() {
   return (
     <main className="min-h-screen overflow-hidden">
       <div className="market-grid" aria-hidden="true" />
-      <header className="site-header"><a className="brand" href="#top" aria-label="港股情緒雷達首頁"><span className="brand-mark">港</span><span><strong>港股情緒雷達</strong><small>MARKET SENTIMENT LAB</small></span></a><Badge variant="outline" className="live-badge"><span className="live-dot" /> PUBLIC V2</Badge></header>
+      <header className="site-header"><a className="brand" href="#top" aria-label="港股情緒雷達首頁"><span className="brand-mark">港</span><span><strong>港股情緒雷達</strong><small>MARKET SENTIMENT LAB</small></span></a><Badge variant="outline" className="live-badge"><span className="live-dot" /> OFFICIAL API BRANCH</Badge></header>
 
       <section className="workspace-shell" id="top">
-        <div className="intro-copy"><Badge variant="outline" className="section-badge"><Activity data-icon="inline-start" /> SECONDARY MARKET INTELLIGENCE</Badge><h1>從市場雜音中，<span>看見情緒轉向。</span></h1><p>整合公開論壇、富途登入頁最新討論與價格變化，分析當天及前兩日市場情緒。</p></div>
+        <div className="intro-copy"><Badge variant="outline" className="section-badge"><Activity data-icon="inline-start" /> SECONDARY MARKET INTELLIGENCE</Badge><h1>從市場雜音中，<span>看見情緒轉向。</span></h1><p>整合富途官方社區 API、公開論壇與價格變化，分析當天及前兩日市場情緒。</p></div>
 
-        <section className={`futu-connect-card state-${connectorState}`} aria-label="富途牛牛本機連接">
+        <section className={`futu-connect-card state-${futuApiState}`} aria-label="富途牛牛官方社區 API">
           <div className="futu-connect-main">
             <div className="futu-icon"><MonitorUp size={23} /></div>
             <div className="futu-connect-copy">
-              <div><span>FUTU LOCAL CONNECTOR</span><Badge variant="outline">V2 安全登入</Badge></div>
-              <h2>連接富途牛牛討論</h2>
-              <p>{connectorMessage}</p>
+              <div><span>FUTU OFFICIAL COMMUNITY API</span><Badge variant="outline">無需登入</Badge></div>
+              <h2>直接抓取富途牛牛討論</h2>
+              <p>{futuApiMessage}</p>
             </div>
-            <div className="connector-status"><i /><span>{connectorState === 'connected' || connectorState === 'scraping' ? '已連接' : connectorState === 'service-ready' || connectorState === 'login-open' ? '等待登入' : connectorState === 'checking' ? '檢查中' : '未連接'}</span>{futuCount > 0 && <b>{futuCount} 條</b>}</div>
+            <div className="connector-status"><i /><span>{loading ? 'API 抓取中' : hasRun && futuApiSource?.ok ? 'API 正常' : hasRun ? 'API 受限' : 'API 就緒'}</span>{futuCount > 0 && <b>{futuCount} 條</b>}</div>
           </div>
           <div className="connector-steps">
-            <div className={connectorState !== 'unavailable' ? 'done' : ''}><span>1</span><p>啟動 Windows 連接器</p></div>
+            <div className={code ? 'done' : ''}><span>1</span><p>輸入港股編號</p></div>
             <i />
-            <div className={['login-open', 'connected', 'scraping'].includes(connectorState) ? 'done' : ''}><span>2</span><p>官方頁面登入</p></div>
+            <div className={hasRun && futuApiSource?.ok ? 'done' : ''}><span>2</span><p>官方 API 抓取討論</p></div>
             <i />
-            <div className={['connected', 'scraping'].includes(connectorState) ? 'done' : ''}><span>3</span><p>同步最新討論</p></div>
+            <div className={hasRun ? 'done' : ''}><span>3</span><p>合併情緒分析</p></div>
           </div>
           <div className="connector-actions">
-            {connectorState === 'unavailable' && <a className="connector-download" href="/futu-connector-v2.zip" download><Download size={15} />下載 Windows 連接器</a>}
-            {(connectorState === 'unavailable' || connectorState === 'error') && <Button type="button" variant="outline" onClick={() => checkConnector(false)}><RefreshCw data-icon="inline-start" />重新檢查</Button>}
-            {connectorState === 'service-ready' && <Button type="button" onClick={openFutuLogin}><LogIn data-icon="inline-start" />開啟富途官方登入</Button>}
-            {connectorState === 'login-open' && <Button type="button" onClick={confirmFutuLogin}><CheckCircle2 data-icon="inline-start" />我已完成登入</Button>}
-            {connectorState === 'connected' && <Button type="button" variant="outline" onClick={() => checkConnector(false)}><PlugZap data-icon="inline-start" />檢查連線</Button>}
-            {connectorState === 'checking' || connectorState === 'scraping' ? <span className="connector-working"><LoaderCircle className="spin" size={15} />處理中</span> : null}
-            <small><ShieldCheck size={13} />帳號、密碼、驗證碼及 Cookie 只留在你的電腦</small>
+            <a className="connector-download" href="https://open.futunn.com/" target="_blank" rel="noreferrer"><ExternalLink size={15} />富途官方 API 文件</a>
+            {loading ? <span className="connector-working"><LoaderCircle className="spin" size={15} />處理中</span> : null}
+            <small><ShieldCheck size={13} />不讀取登入頁、密碼、驗證碼或 Cookie</small>
           </div>
         </section>
 
         <form className="stock-search" aria-label="港股分析搜尋" onSubmit={runAnalysis}>
           <label htmlFor="stock-code">港股編號</label>
-          <div className="search-controls"><div className="stock-input-wrap"><span>HK</span><Input id="stock-code" name="code" inputMode="numeric" maxLength={5} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} aria-describedby="search-note" /></div><Button type="submit" size="lg" className="analyze-button" disabled={loading}>{loading ? <LoaderCircle className="spin" data-icon="inline-start" /> : <Search data-icon="inline-start" />}{loading ? (connectorState === 'scraping' ? '正在抓取富途…' : '正在整合資料…') : '抓取及分析'} <ArrowUpRight data-icon="inline-end" /></Button></div>
-          <div className="search-footer" id="search-note"><span>常用：{[['00700', '騰訊'], ['09988', '阿里'], ['01810', '小米']].map(([value, label], index) => <button type="button" onClick={() => setCode(value)} key={value}>{index ? ' · ' : ''}{value} {label}</button>)}</span><span><ShieldCheck size={13} /> 公開來源＋可選本機富途資料</span></div>
+          <div className="search-controls"><div className="stock-input-wrap"><span>HK</span><Input id="stock-code" name="code" inputMode="numeric" maxLength={5} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} aria-describedby="search-note" /></div><Button type="submit" size="lg" className="analyze-button" disabled={loading}>{loading ? <LoaderCircle className="spin" data-icon="inline-start" /> : <Search data-icon="inline-start" />}{loading ? '正在抓取官方 API…' : '抓取及分析'} <ArrowUpRight data-icon="inline-end" /></Button></div>
+          <div className="search-footer" id="search-note"><span>常用：{[['00700', '騰訊'], ['09988', '阿里'], ['01810', '小米']].map(([value, label], index) => <button type="button" onClick={() => setCode(value)} key={value}>{index ? ' · ' : ''}{value} {label}</button>)}</span><span><ShieldCheck size={13} /> 富途官方 API＋其他公開來源</span></div>
           {error && <div className="error-banner" role="alert"><CircleAlert size={16} />{error}<button type="button" onClick={() => runAnalysis(undefined, code, 'demo')}>改看示例</button></div>}
         </form>
 
@@ -244,10 +161,10 @@ export default function Home() {
           {futuLatest.length > 0 && <article className="source-card futu-latest-card"><div className="panel-heading"><div><span>FUTU LATEST DISCUSSIONS</span><h3>富途最新討論</h3></div><Badge variant="outline" className="futu-count">{futuLatest.length} 條代表內容</Badge></div><div className="futu-latest-list">{futuLatest.map((post) => <a href={post.url === '#' ? undefined : post.url} target="_blank" rel="noreferrer" key={`${post.source}-${post.id}`}><div><strong>{post.author}</strong><small>{new Date(post.publishedAt).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small></div><p>{post.title}</p>{post.url !== '#' && <ExternalLink size={13}/>}</a>)}</div></article>}
           <div className="opinion-grid"><PostList title="代表性看好觀點" posts={result.excerpts.positive} tone="positive"/><PostList title="代表性看淡觀點" posts={result.excerpts.negative} tone="negative"/></div>
           <article className="source-card"><div className="panel-heading"><div><span>DATA TRANSPARENCY</span><h3>資料來源狀態</h3></div><FileText size={18}/></div><div className="source-grid">{result.sources.map((source) => <div key={source.key}><span className={source.ok ? 'source-ok' : 'source-limited'}>{source.ok ? <CheckCircle2 size={15}/> : <WifiOff size={15}/>} {source.label}</span><strong>{source.count || '—'}</strong><small>{source.message}</small></div>)}</div></article>
-          <div className="disclaimer"><ShieldCheck size={16}/><p><strong>研究工具，不是投資建議。</strong> V2 可加入使用者本機富途登入頁的可見討論；所有來源仍可能受限、延遲或不完整。任何概率只供比較市場情緒強弱。</p></div>
+          <div className="disclaimer"><ShieldCheck size={16}/><p><strong>研究工具，不是投資建議。</strong> 富途討論由官方公開社區 API 取得，不使用登入頁面抓取。所有來源仍可能受限、延遲或不完整，任何概率只供比較市場情緒強弱。</p></div>
         </section>
       </section>
-      <footer><span>港股情緒雷達 · PUBLIC V2</span><span>資料截至分析當刻 · 香港時間</span></footer>
+      <footer><span>港股情緒雷達 · OFFICIAL API BRANCH</span><span>資料截至分析當刻 · 香港時間</span></footer>
     </main>
   );
 }

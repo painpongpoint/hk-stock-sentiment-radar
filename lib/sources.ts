@@ -24,11 +24,14 @@ function fetchWithTimeout(url: string, init: RequestInit = {}, timeout = 10_000)
 function cleanHtml(input: string) {
   return input
     .replace(/<[^>]*>/g, ' ')
+    .replace(/&#x([0-9a-f]+);/gi, (_match, value) => String.fromCodePoint(Number.parseInt(value, 16)))
+    .replace(/&#(\d+);/g, (_match, value) => String.fromCodePoint(Number.parseInt(value, 10)))
     .replace(/&nbsp;|&#160;/gi, ' ')
     .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
+    .replace(/&apos;|&#39;/gi, "'")
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -69,6 +72,10 @@ function parseDate(value: unknown) {
   }
   const text = String(value ?? '').trim();
   if (!text) return null;
+  if (/^\d{10,13}$/.test(text)) {
+    const stamp = Number(text);
+    return new Date(stamp > 10_000_000_000 ? stamp : stamp * 1000);
+  }
   const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(text)
     ? `${text.slice(0, 10)}T${text.slice(11, 19)}+08:00`
     : text;
@@ -169,6 +176,62 @@ async function futuSource(code: string) {
   }
 }
 
+async function futuCommunitySource(code: string) {
+  try {
+    const params = new URLSearchParams({ keyword: code, size: '50' });
+    const response = await fetchWithTimeout(`https://ai-news-search.futunn.com/stock_feed?${params.toString()}`, {
+      headers: {
+        ...HEADERS,
+        Accept: 'application/json',
+        'User-Agent': 'hk-stock-sentiment-radar/2.2 (Futu official community API)',
+      },
+    }, 12_000);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json() as { code?: number; message?: string; data?: unknown[] };
+    if (payload.code !== 0) throw new Error(payload.message || `API code ${payload.code ?? 'unknown'}`);
+    const cutoff = Date.now() - 3 * 86_400_000;
+    const stockUrl = `https://www.futunn.com/stock/${code}-HK`;
+    const posts = (Array.isArray(payload.data) ? payload.data : []).flatMap((item, index): ForumPost[] => {
+      if (!item || typeof item !== 'object') return [];
+      const record = item as Record<string, unknown>;
+      const title = cleanHtml(String(record.desc || record.title || ''));
+      const published = parseDate(record.publish_time);
+      if (!published || published.getTime() < cutoff || title.length < 4) return [];
+      return [{
+        id: String(record.id ?? `futu-api-${index}`),
+        title,
+        author: '富途社區用戶',
+        publishedAt: published.toISOString(),
+        source: '富途牛牛討論',
+        url: stockUrl,
+        comments: 0,
+        views: 0,
+      }];
+    }).filter((item, index, all) => all.findIndex((other) => other.id === item.id || other.title === item.title) === index);
+    return {
+      posts,
+      status: {
+        key: 'futu-community',
+        label: '富途官方社區 API',
+        ok: posts.length > 0,
+        count: posts.length,
+        message: posts.length ? `官方 stock_feed API 已取得近三日 ${posts.length} 條討論` : '官方 API 暫未回傳近三日討論',
+      } satisfies SourceStatus,
+    };
+  } catch (error) {
+    return {
+      posts: [] as ForumPost[],
+      status: {
+        key: 'futu-community',
+        label: '富途官方社區 API',
+        ok: false,
+        count: 0,
+        message: `官方 API 暫時無法讀取：${error instanceof Error ? error.message : '未知錯誤'}`,
+      } satisfies SourceStatus,
+    };
+  }
+}
+
 async function xueqiuSource(code: string) {
   try {
     const response = await fetchWithTimeout(`https://xueqiu.com/query/v1/search/status.json?q=${code}&count=30&sort=time`, { headers: { ...HEADERS, Accept: 'application/json' } }, 7_000);
@@ -210,14 +273,21 @@ export function demoBundle(code: string): SourceBundle {
     { key: 'market', label: '市場行情', ok: true, count: market.length, message: '使用示例行情' },
     { key: 'xueqiu', label: '雪球', ok: false, count: 0, message: '示例模式未連線' },
     { key: 'futu', label: '富途牛牛', ok: false, count: 0, message: '示例模式未連線' },
+    { key: 'futu-community', label: '富途官方社區 API', ok: false, count: 0, message: '示例模式未連線' },
   ] };
 }
 
 export async function liveBundle(code: string): Promise<SourceBundle> {
-  const [market, eastmoney, futu, xueqiu] = await Promise.all([marketSource(code), eastmoneySource(code), futuSource(code), xueqiuSource(code)]);
+  const [market, eastmoney, futu, futuCommunity, xueqiu] = await Promise.all([
+    marketSource(code),
+    eastmoneySource(code),
+    futuSource(code),
+    futuCommunitySource(code),
+    xueqiuSource(code),
+  ]);
   return {
     code, mode: 'live', companyName: futu.companyName || market.companyName || `港股 ${code}`,
-    market: market.market, posts: [...eastmoney.posts, ...xueqiu.posts], news: futu.news,
-    sources: [market.status, eastmoney.status, xueqiu.status, futu.status],
+    market: market.market, posts: [...futuCommunity.posts, ...eastmoney.posts, ...xueqiu.posts], news: futu.news,
+    sources: [market.status, futuCommunity.status, eastmoney.status, xueqiu.status, futu.status],
   };
 }
