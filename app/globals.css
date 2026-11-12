@@ -227,7 +227,7 @@ button { cursor: pointer; }
 .opinion-panel .badge.negative { border-color: rgba(255,111,118,.25); color: #ff8c91; }
 .opinion-list { margin-top: 13px; }
 .opinion-item { display: grid; grid-template-columns: 5px 1fr auto; align-items: center; gap: 10px; padding: 12px 0; color: inherit; border-top: 1px solid var(--border); text-decoration: none; }
-.opinion-item p { margin: 0; color: #c5d3cd; font-size: 10px; line-height: 1.55; }
+.opinion-item p { margin: 0; color: #c5d3cd; font-size: 10px; line-height: 1.55; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; word-break: break-word; }
 .opinion-item small { display: block; margin-top: 4px; color: #5f746b; font-size: 8px; }
 .opinion-item > svg { color: #5f746b; }
 .sentiment-mark { width: 4px; height: 28px; border-radius: 999px; background: #6e8880; }
@@ -250,7 +250,7 @@ button { cursor: pointer; }
 .futu-latest-list > a > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; grid-column: 1 / -1; }
 .futu-latest-list strong { color: #a9cfc1; font-size: 9px; }
 .futu-latest-list small { color: #5f746b; font: 500 8px/1 var(--font-geist-mono); }
-.futu-latest-list p { margin: 0; color: #c4d3cc; font-size: 10px; line-height: 1.55; }
+.futu-latest-list p { margin: 0; color: #c4d3cc; font-size: 10px; line-height: 1.55; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; word-break: break-word; }
 .futu-latest-list svg { align-self: center; color: #5f746b; }
 .disclaimer { display: flex; align-items: flex-start; gap: 9px; margin-top: 18px; color: #698078; font-size: 9px; line-height: 1.55; }
 .disclaimer svg { flex: none; margin-top: 1px; }

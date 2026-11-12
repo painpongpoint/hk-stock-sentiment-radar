@@ -219,7 +219,6 @@ async function futuCommunitySource(code: string) {
     const payload = await response.json() as { code?: number; message?: string; data?: unknown[] };
     if (payload.code !== 0) throw new Error(payload.message || `API code ${payload.code ?? 'unknown'}`);
     const cutoff = Date.now() - 3 * 86_400_000;
-    const stockUrl = `https://www.futunn.com/stock/${code}-HK`;
     const posts = (Array.isArray(payload.data) ? payload.data : []).flatMap((item, index): ForumPost[] => {
       if (!item || typeof item !== 'object') return [];
       const record = item as Record<string, unknown>;
@@ -232,7 +231,7 @@ async function futuCommunitySource(code: string) {
         author: '富途社區用戶',
         publishedAt: published.toISOString(),
         source: '富途牛牛討論',
-        url: stockUrl,
+        url: `https://q.futunn.com/hk/feed/${encodeURIComponent(String(record.id ?? ''))}`,
         comments: 0,
         views: 0,
       }];
