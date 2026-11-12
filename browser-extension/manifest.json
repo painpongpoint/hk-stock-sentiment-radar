@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "港股情緒雷達－富途討論擷取",
+  "version": "2.1.0",
+  "description": "在使用者已登入的富途官方頁面讀取可見討論，並傳回港股情緒雷達進行分析。",
+  "permissions": ["tabs", "storage"],
+  "host_permissions": [
+    "https://*.futunn.com/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*",
+    "https://hk-stock-sentiment-radar.luis-mok.chatgpt.site/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "港股情緒雷達",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost:3000/*",
+        "http://127.0.0.1:3000/*",
+        "https://hk-stock-sentiment-radar.luis-mok.chatgpt.site/*"
+      ],
+      "js": ["app-bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://*.futunn.com/*"],
+      "js": ["futu-scraper.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

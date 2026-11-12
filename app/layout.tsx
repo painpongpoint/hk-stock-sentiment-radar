@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL('https://hk-stock-sentiment-radar.luis-mok.chatgpt.site'),
   title: '港股情緒雷達 V2｜香港股票市場情緒分析',
-  description: '整合近三日公開論壇、使用者本機富途討論及價格變化，提供可解釋的市場情緒研究報告。',
+  description: '整合近三日公開論壇、瀏覽器擴充功能擷取的富途可見討論及價格變化，提供可解釋的市場情緒研究報告。',
   openGraph: {
     title: '港股情緒雷達',
     description: '看見市場情緒轉向',

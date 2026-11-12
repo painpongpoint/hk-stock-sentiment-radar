@@ -45,7 +45,13 @@ function normalizeFutuPosts(value: unknown): ForumPost[] {
     const parsedDate = new Date(String(record.publishedAt ?? now));
     const publishedAt = Number.isNaN(parsedDate.getTime()) || parsedDate.getTime() < cutoff ? now : parsedDate.toISOString();
     const candidateUrl = String(record.url ?? '');
-    const url = candidateUrl.startsWith('https://www.futunn.com/') ? candidateUrl : '#';
+    let url = '#';
+    try {
+      const parsedUrl = new URL(candidateUrl);
+      if (parsedUrl.protocol === 'https:' && (parsedUrl.hostname === 'futunn.com' || parsedUrl.hostname.endsWith('.futunn.com'))) url = parsedUrl.href;
+    } catch {
+      url = '#';
+    }
     return [{
       id: String(record.id ?? `futu-local-${index}`).slice(0, 100),
       title,
@@ -75,7 +81,7 @@ export async function POST(request: Request) {
           label: '富途牛牛討論',
           ok: true,
           count: futuPosts.length,
-          message: `由使用者本機登入連接器取得 ${futuPosts.length} 條最新討論`,
+          message: `由使用者瀏覽器擴充功能取得 ${futuPosts.length} 條可見討論`,
         },
       ];
     } else {
@@ -84,7 +90,7 @@ export async function POST(request: Request) {
         label: '富途牛牛討論',
         ok: false,
         count: 0,
-        message: '本次分析沒有收到本機富途討論資料',
+        message: '本次分析沒有收到瀏覽器擴充功能擷取的富途討論',
       });
     }
     const data = analyze(bundle);

@@ -118,7 +118,7 @@ button { cursor: pointer; }
 .futu-connect-copy p { margin: 0; color: #789087; font-size: 10px; line-height: 1.5; }
 .connector-status { min-width: 105px; display: flex; align-items: center; justify-content: flex-end; gap: 7px; color: #8aa097; font: 650 9px/1 var(--font-geist-mono); }
 .connector-status i { width: 7px; height: 7px; border-radius: 50%; background: #ff7b81; box-shadow: 0 0 10px rgba(255,111,118,.3); }
-.state-checking .connector-status i, .state-login-open .connector-status i, .state-service-ready .connector-status i { background: #f1c867; box-shadow: 0 0 10px rgba(241,200,103,.38); }
+.state-checking .connector-status i, .state-ready .connector-status i, .state-login-open .connector-status i { background: #f1c867; box-shadow: 0 0 10px rgba(241,200,103,.38); }
 .state-connected .connector-status i, .state-scraping .connector-status i { background: #c8ff45; box-shadow: 0 0 10px rgba(200,255,69,.52); }
 .connector-status b { padding: 4px 6px; color: #c8ff45; border-radius: 6px; background: rgba(200,255,69,.08); }
 .connector-steps { margin: 17px 0 14px 62px; display: grid; grid-template-columns: max-content 1fr max-content 1fr max-content; align-items: center; gap: 10px; }

@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   Activity, ArrowDownRight, ArrowUpRight, CheckCircle2, CircleAlert, Database,
-  Download, ExternalLink, FileText, LoaderCircle, LogIn, MonitorUp, PlugZap,
+  Download, ExternalLink, FileText, LoaderCircle, LogIn, MonitorUp,
   RefreshCw, Search, ShieldCheck, Sparkles, TrendingUp, WifiOff,
 } from 'lucide-react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
@@ -34,31 +34,40 @@ const SAMPLE: AnalysisResult = {
 };
 
 const chartConfig = { close: { label: '收市價', color: '#c8ff45' }, sentimentIndex: { label: '情緒指數', color: '#56d6ae' } };
-const CONNECTOR_URL = 'http://127.0.0.1:8766';
-
-type ConnectorState = 'checking' | 'unavailable' | 'service-ready' | 'login-open' | 'connected' | 'scraping' | 'error';
-type ConnectorStatus = {
+const WEB_EXTENSION_CHANNEL = 'HKSR_WEB_V2';
+const BROWSER_EXTENSION_CHANNEL = 'HKSR_EXTENSION_V2';
+type ExtensionState = 'checking' | 'missing' | 'ready' | 'login-open' | 'connected' | 'scraping' | 'error';
+type ExtensionResponse = {
   ok: boolean;
-  state: ConnectorState;
-  browserOpen?: boolean;
-  loginConfirmed?: boolean;
-  message?: string;
+  version?: string;
+  loggedIn?: boolean;
+  loginPromptVisible?: boolean;
   posts?: ForumPost[];
   count?: number;
+  message?: string;
   error?: string;
 };
 
-async function connectorRequest(path: string, init?: RequestInit, timeout = 6_000): Promise<ConnectorStatus> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(`${CONNECTOR_URL}${path}`, { ...init, mode: 'cors', cache: 'no-store', signal: controller.signal });
-    const payload = await response.json() as ConnectorStatus;
-    if (!response.ok) throw new Error(payload.error || payload.message || '本機連接器回應錯誤');
-    return payload;
-  } finally {
-    window.clearTimeout(timer);
-  }
+function extensionRequest(action: string, payload: Record<string, unknown> = {}, timeout = 5_000): Promise<ExtensionResponse> {
+  return new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+    const timer = window.setTimeout(() => {
+      window.removeEventListener('message', receive);
+      reject(new Error('未偵測到港股情緒雷達瀏覽器擴充功能。'));
+    }, timeout);
+    function receive(event: MessageEvent) {
+      const message = event.data;
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      if (message?.channel !== BROWSER_EXTENSION_CHANNEL || message?.type !== 'EXTENSION_RESPONSE' || message?.requestId !== requestId) return;
+      window.clearTimeout(timer);
+      window.removeEventListener('message', receive);
+      const response = message.response as ExtensionResponse;
+      if (!response?.ok) reject(new Error(response?.error || '擴充功能未能完成操作。'));
+      else resolve(response);
+    }
+    window.addEventListener('message', receive);
+    window.postMessage({ channel: WEB_EXTENSION_CHANNEL, type: 'EXTENSION_REQUEST', requestId, action, payload }, window.location.origin);
+  });
 }
 
 function formatSigned(value: number | null, suffix = '') {
@@ -87,11 +96,42 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [hasRun, setHasRun] = useState(false);
-  const [connectorState, setConnectorState] = useState<ConnectorState>('checking');
-  const [connectorMessage, setConnectorMessage] = useState('正在檢查 Windows 本機連接器…');
+  const [extensionState, setExtensionState] = useState<ExtensionState>('checking');
+  const [extensionMessage, setExtensionMessage] = useState('正在偵測富途瀏覽器擴充功能…');
+  const [extensionVersion, setExtensionVersion] = useState('');
   const [futuCount, setFutuCount] = useState(0);
 
-  useEffect(() => { void checkConnector(true); }, []);
+  useEffect(() => {
+    let active = true;
+    async function detectExtension() {
+      setExtensionState('checking');
+      setExtensionMessage('正在偵測富途瀏覽器擴充功能…');
+      try {
+        const response = await extensionRequest('PING', {}, 2_000);
+        if (!active) return;
+        setExtensionVersion(response.version ?? '');
+        setExtensionState('ready');
+        setExtensionMessage('擴充功能已連接。下一步開啟富途官方登入視窗。');
+      } catch {
+        if (!active) return;
+        setExtensionState('missing');
+        setExtensionMessage('尚未偵測到擴充功能。安裝後重新整理本頁即可自動連接。');
+      }
+    }
+    function handleReady(event: MessageEvent) {
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      if (event.data?.channel !== BROWSER_EXTENSION_CHANNEL || event.data?.type !== 'EXTENSION_READY') return;
+      setExtensionVersion(String(event.data.version ?? ''));
+      setExtensionState('ready');
+      setExtensionMessage('擴充功能已連接。下一步開啟富途官方登入視窗。');
+    }
+    window.addEventListener('message', handleReady);
+    void detectExtension();
+    return () => {
+      active = false;
+      window.removeEventListener('message', handleReady);
+    };
+  }, []);
 
   const metrics = useMemo(() => [
     { label: '最新價格', value: result.market.latestPrice == null ? '未取得' : `HK$ ${result.market.latestPrice.toFixed(2)}`, note: result.market.changePct == null ? result.market.trend : `三日 ${formatSigned(result.market.changePct, '%')}`, up: (result.market.changePct ?? 0) >= 0 },
@@ -105,41 +145,44 @@ export default function Home() {
     [result],
   );
 
-  async function checkConnector(quiet = false) {
-    if (!quiet) setConnectorState('checking');
+  async function detectExtension() {
+    setExtensionState('checking');
+    setExtensionMessage('正在重新偵測擴充功能…');
     try {
-      const status = await connectorRequest('/health');
-      const state = status.loginConfirmed ? 'connected' : status.browserOpen ? 'login-open' : 'service-ready';
-      setConnectorState(state);
-      setConnectorMessage(status.loginConfirmed ? '富途本機登入已確認，可以同步最新討論。' : status.browserOpen ? '官方富途登入頁已開啟；完成登入後返回這裡確認。' : '本機連接器已啟動，下一步開啟富途官方登入。');
-    } catch {
-      setConnectorState('unavailable');
-      setConnectorMessage('尚未偵測到本機連接器。下載並啟動後，再按重新檢查。');
+      const response = await extensionRequest('PING', {}, 2_500);
+      setExtensionVersion(response.version ?? '');
+      setExtensionState('ready');
+      setExtensionMessage('擴充功能已連接。下一步開啟富途官方登入視窗。');
+    } catch (reason) {
+      setExtensionState('missing');
+      setExtensionMessage(reason instanceof Error ? reason.message : '未偵測到擴充功能。');
     }
   }
 
   async function openFutuLogin() {
-    setConnectorState('checking');
-    setConnectorMessage('正在開啟富途官方登入頁…');
+    setExtensionState('checking');
+    setExtensionMessage('正在透過擴充功能開啟富途官方登入…');
     try {
-      await connectorRequest('/open-login', { method: 'POST' }, 55_000);
-      setConnectorState('login-open');
-      setConnectorMessage('請在新 Chrome 視窗完成富途登入及驗證，密碼不會傳到本網站。');
+      await extensionRequest('OPEN_LOGIN');
+      setExtensionState('login-open');
+      setExtensionMessage('富途官方登入視窗已開啟。完成登入及驗證後，返回這裡按「我已完成登入」。');
     } catch (reason) {
-      setConnectorState('error');
-      setConnectorMessage(reason instanceof Error ? reason.message : '未能開啟富途登入頁。');
+      setExtensionState('error');
+      setExtensionMessage(reason instanceof Error ? reason.message : '未能開啟富途登入視窗。');
     }
   }
 
   async function confirmFutuLogin() {
-    setConnectorState('checking');
+    setExtensionState('checking');
+    setExtensionMessage('正在確認富途視窗…');
     try {
-      await connectorRequest('/confirm-login', { method: 'POST' });
-      setConnectorState('connected');
-      setConnectorMessage('登入已確認；開始分析時會由本機瀏覽器同步富途最新討論。');
+      const response = await extensionRequest('CHECK_SESSION', {}, 12_000);
+      if (response.loginPromptVisible && !response.loggedIn) throw new Error('富途頁面仍顯示登入入口，請先在富途視窗完成登入。');
+      setExtensionState('connected');
+      setExtensionMessage('富途視窗已連接。開始分析時，擴充功能會自動開啟股票頁並讀取可見討論。');
     } catch (reason) {
-      setConnectorState('error');
-      setConnectorMessage(reason instanceof Error ? reason.message : '未能確認登入。');
+      setExtensionState('error');
+      setExtensionMessage(reason instanceof Error ? reason.message : '未能確認富途登入視窗。');
     }
   }
 
@@ -151,20 +194,18 @@ export default function Home() {
     setCode(normalized); setLoading(true); setError('');
     try {
       let futuPosts: ForumPost[] = [];
-      if (mode === 'live' && connectorState === 'connected') {
-        setConnectorState('scraping');
-        setConnectorMessage(`正在從富途登入頁整理 HK ${normalized} 最新討論…`);
+      if (mode === 'live' && extensionState === 'connected') {
+        setExtensionState('scraping');
+        setExtensionMessage(`正在透過擴充功能讀取 HK ${normalized} 的富途可見討論…`);
         try {
-          const local = await connectorRequest('/scrape', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: normalized }),
-          }, 75_000);
-          futuPosts = local.posts ?? [];
+          const extension = await extensionRequest('SCRAPE_STOCK', { code: normalized }, 55_000);
+          futuPosts = Array.isArray(extension.posts) ? extension.posts : [];
           setFutuCount(futuPosts.length);
-          setConnectorState('connected');
-          setConnectorMessage(futuPosts.length ? `已同步 ${futuPosts.length} 條富途最新討論。` : (local.message || '本次未識別到富途討論，已繼續分析其他來源。'));
+          setExtensionState('connected');
+          setExtensionMessage(extension.message || (futuPosts.length ? `已讀取 ${futuPosts.length} 條富途討論。` : '未識別到富途討論；本次會繼續分析其他公開來源。'));
         } catch (reason) {
-          setConnectorState('error');
-          setConnectorMessage(`${reason instanceof Error ? reason.message : '富途抓取失敗'}；本次已改用其他公開來源。`);
+          setExtensionState('error');
+          setExtensionMessage(`${reason instanceof Error ? reason.message : '富途擷取失敗'}；本次已改用其他公開來源。`);
         }
       }
       const response = futuPosts.length
@@ -191,40 +232,40 @@ export default function Home() {
       <header className="site-header"><a className="brand" href="#top" aria-label="港股情緒雷達首頁"><span className="brand-mark">港</span><span><strong>港股情緒雷達</strong><small>MARKET SENTIMENT LAB</small></span></a><Badge variant="outline" className="live-badge"><span className="live-dot" /> PUBLIC V2</Badge></header>
 
       <section className="workspace-shell" id="top">
-        <div className="intro-copy"><Badge variant="outline" className="section-badge"><Activity data-icon="inline-start" /> SECONDARY MARKET INTELLIGENCE</Badge><h1>從市場雜音中，<span>看見情緒轉向。</span></h1><p>整合公開論壇、富途登入頁最新討論與價格變化，分析當天及前兩日市場情緒。</p></div>
+        <div className="intro-copy"><Badge variant="outline" className="section-badge"><Activity data-icon="inline-start" /> SECONDARY MARKET INTELLIGENCE</Badge><h1>從市場雜音中，<span>看見情緒轉向。</span></h1><p>整合公開論壇、富途登入後可見討論與價格變化，分析當天及前兩日市場情緒。</p></div>
 
-        <section className={`futu-connect-card state-${connectorState}`} aria-label="富途牛牛本機連接">
+        <section className={`futu-connect-card state-${extensionState}`} aria-label="富途牛牛瀏覽器擴充功能">
           <div className="futu-connect-main">
             <div className="futu-icon"><MonitorUp size={23} /></div>
             <div className="futu-connect-copy">
-              <div><span>FUTU LOCAL CONNECTOR</span><Badge variant="outline">V2 安全登入</Badge></div>
-              <h2>連接富途牛牛討論</h2>
-              <p>{connectorMessage}</p>
+              <div><span>FUTU BROWSER EXTENSION</span><Badge variant="outline">Chrome / Edge{extensionVersion ? ` · v${extensionVersion}` : ''}</Badge></div>
+              <h2>自動擷取富途登入後討論</h2>
+              <p>{extensionMessage}</p>
             </div>
-            <div className="connector-status"><i /><span>{connectorState === 'connected' || connectorState === 'scraping' ? '已連接' : connectorState === 'service-ready' || connectorState === 'login-open' ? '等待登入' : connectorState === 'checking' ? '檢查中' : '未連接'}</span>{futuCount > 0 && <b>{futuCount} 條</b>}</div>
+            <div className="connector-status"><i /><span>{extensionState === 'connected' || extensionState === 'scraping' ? '已連接' : extensionState === 'ready' ? '擴充功能就緒' : extensionState === 'login-open' ? '等待登入' : extensionState === 'checking' ? '檢查中' : extensionState === 'missing' ? '未安裝' : '需要處理'}</span>{futuCount > 0 && <b>{futuCount} 條</b>}</div>
           </div>
           <div className="connector-steps">
-            <div className={connectorState !== 'unavailable' ? 'done' : ''}><span>1</span><p>啟動 Windows 連接器</p></div>
+            <div className={!['checking', 'missing'].includes(extensionState) ? 'done' : ''}><span>1</span><p>安裝並連接擴充功能</p></div>
             <i />
-            <div className={['login-open', 'connected', 'scraping'].includes(connectorState) ? 'done' : ''}><span>2</span><p>官方頁面登入</p></div>
+            <div className={['connected', 'scraping'].includes(extensionState) ? 'done' : ''}><span>2</span><p>在富途官方頁面登入</p></div>
             <i />
-            <div className={['connected', 'scraping'].includes(connectorState) ? 'done' : ''}><span>3</span><p>同步最新討論</p></div>
+            <div className={futuCount > 0 ? 'done' : ''}><span>3</span><p>自動擷取及分析討論</p></div>
           </div>
           <div className="connector-actions">
-            {connectorState === 'unavailable' && <a className="connector-download" href="/futu-connector-v2.zip" download><Download size={15} />下載 Windows 連接器</a>}
-            {(connectorState === 'unavailable' || connectorState === 'error') && <Button type="button" variant="outline" onClick={() => checkConnector(false)}><RefreshCw data-icon="inline-start" />重新檢查</Button>}
-            {connectorState === 'service-ready' && <Button type="button" onClick={openFutuLogin}><LogIn data-icon="inline-start" />開啟富途官方登入</Button>}
-            {connectorState === 'login-open' && <Button type="button" onClick={confirmFutuLogin}><CheckCircle2 data-icon="inline-start" />我已完成登入</Button>}
-            {connectorState === 'connected' && <Button type="button" variant="outline" onClick={() => checkConnector(false)}><PlugZap data-icon="inline-start" />檢查連線</Button>}
-            {connectorState === 'checking' || connectorState === 'scraping' ? <span className="connector-working"><LoaderCircle className="spin" size={15} />處理中</span> : null}
-            <small><ShieldCheck size={13} />帳號、密碼、驗證碼及 Cookie 只留在你的電腦</small>
+            {extensionState === 'missing' && <a className="connector-download" href="/hk-stock-sentiment-extension-v2.zip" download><Download size={15} />下載擴充功能</a>}
+            {(extensionState === 'missing' || extensionState === 'error') && <Button type="button" variant="outline" onClick={detectExtension}><RefreshCw data-icon="inline-start" />重新偵測</Button>}
+            {extensionState === 'ready' && <Button type="button" onClick={openFutuLogin}><LogIn data-icon="inline-start" />開啟富途官方登入</Button>}
+            {extensionState === 'login-open' && <Button type="button" onClick={confirmFutuLogin}><CheckCircle2 data-icon="inline-start" />我已完成登入</Button>}
+            {extensionState === 'connected' && <Button type="button" variant="outline" onClick={openFutuLogin}><LogIn data-icon="inline-start" />重新開啟富途</Button>}
+            {extensionState === 'checking' || extensionState === 'scraping' ? <span className="connector-working"><LoaderCircle className="spin" size={15} />處理中</span> : null}
+            <small><ShieldCheck size={13} />只傳送可見討論文字；密碼、驗證碼及 Cookie 不會離開富途</small>
           </div>
         </section>
 
         <form className="stock-search" aria-label="港股分析搜尋" onSubmit={runAnalysis}>
           <label htmlFor="stock-code">港股編號</label>
-          <div className="search-controls"><div className="stock-input-wrap"><span>HK</span><Input id="stock-code" name="code" inputMode="numeric" maxLength={5} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} aria-describedby="search-note" /></div><Button type="submit" size="lg" className="analyze-button" disabled={loading}>{loading ? <LoaderCircle className="spin" data-icon="inline-start" /> : <Search data-icon="inline-start" />}{loading ? (connectorState === 'scraping' ? '正在抓取富途…' : '正在整合資料…') : '抓取及分析'} <ArrowUpRight data-icon="inline-end" /></Button></div>
-          <div className="search-footer" id="search-note"><span>常用：{[['00700', '騰訊'], ['09988', '阿里'], ['01810', '小米']].map(([value, label], index) => <button type="button" onClick={() => setCode(value)} key={value}>{index ? ' · ' : ''}{value} {label}</button>)}</span><span><ShieldCheck size={13} /> 公開來源＋可選本機富途資料</span></div>
+          <div className="search-controls"><div className="stock-input-wrap"><span>HK</span><Input id="stock-code" name="code" inputMode="numeric" maxLength={5} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} aria-describedby="search-note" /></div><Button type="submit" size="lg" className="analyze-button" disabled={loading}>{loading ? <LoaderCircle className="spin" data-icon="inline-start" /> : <Search data-icon="inline-start" />}{loading ? (extensionState === 'scraping' ? '正在擷取富途…' : '正在整合資料…') : '抓取及分析'} <ArrowUpRight data-icon="inline-end" /></Button></div>
+          <div className="search-footer" id="search-note"><span>常用：{[['00700', '騰訊'], ['09988', '阿里'], ['01810', '小米']].map(([value, label], index) => <button type="button" onClick={() => setCode(value)} key={value}>{index ? ' · ' : ''}{value} {label}</button>)}</span><span><ShieldCheck size={13} /> 公開來源＋擴充功能擷取的富途討論</span></div>
           {error && <div className="error-banner" role="alert"><CircleAlert size={16} />{error}<button type="button" onClick={() => runAnalysis(undefined, code, 'demo')}>改看示例</button></div>}
         </form>
 
@@ -244,7 +285,7 @@ export default function Home() {
           {futuLatest.length > 0 && <article className="source-card futu-latest-card"><div className="panel-heading"><div><span>FUTU LATEST DISCUSSIONS</span><h3>富途最新討論</h3></div><Badge variant="outline" className="futu-count">{futuLatest.length} 條代表內容</Badge></div><div className="futu-latest-list">{futuLatest.map((post) => <a href={post.url === '#' ? undefined : post.url} target="_blank" rel="noreferrer" key={`${post.source}-${post.id}`}><div><strong>{post.author}</strong><small>{new Date(post.publishedAt).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small></div><p>{post.title}</p>{post.url !== '#' && <ExternalLink size={13}/>}</a>)}</div></article>}
           <div className="opinion-grid"><PostList title="代表性看好觀點" posts={result.excerpts.positive} tone="positive"/><PostList title="代表性看淡觀點" posts={result.excerpts.negative} tone="negative"/></div>
           <article className="source-card"><div className="panel-heading"><div><span>DATA TRANSPARENCY</span><h3>資料來源狀態</h3></div><FileText size={18}/></div><div className="source-grid">{result.sources.map((source) => <div key={source.key}><span className={source.ok ? 'source-ok' : 'source-limited'}>{source.ok ? <CheckCircle2 size={15}/> : <WifiOff size={15}/>} {source.label}</span><strong>{source.count || '—'}</strong><small>{source.message}</small></div>)}</div></article>
-          <div className="disclaimer"><ShieldCheck size={16}/><p><strong>研究工具，不是投資建議。</strong> V2 可加入使用者本機富途登入頁的可見討論；所有來源仍可能受限、延遲或不完整。任何概率只供比較市場情緒強弱。</p></div>
+          <div className="disclaimer"><ShieldCheck size={16}/><p><strong>研究工具，不是投資建議。</strong> 擴充功能只讀取富途頁面上可見的討論文字並提交作分析，不會讀取密碼、驗證碼或 Cookie。所有來源仍可能受限、延遲或不完整。</p></div>
         </section>
       </section>
       <footer><span>港股情緒雷達 · PUBLIC V2</span><span>資料截至分析當刻 · 香港時間</span></footer>
