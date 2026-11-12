@@ -145,6 +145,15 @@ button { cursor: pointer; }
 .search-footer span { display: flex; align-items: center; gap: 5px; }
 .search-footer button { padding: 0; border: 0; color: inherit; background: transparent; transition: color .2s ease; }
 .search-footer button:hover { color: #c8ff45; }
+.analysis-progress { margin-top: 14px; padding: 13px 14px; border: 1px solid rgba(200,255,69,.17); border-radius: 12px; background: rgba(200,255,69,.045); }
+.analysis-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.analysis-progress-heading span { display: flex; align-items: center; gap: 7px; color: #bfd0c8; font-size: 10px; }
+.analysis-progress-heading svg { flex: none; color: #c8ff45; }
+.analysis-progress-heading b { color: #c8ff45; font: 700 11px/1 var(--font-geist-mono); }
+.analysis-progress [data-slot="progress"] { gap: 0; }
+.analysis-progress [data-slot="progress-track"] { height: 7px; background: #20332d; }
+.analysis-progress [data-slot="progress-indicator"] { background: linear-gradient(90deg, #56d6ae, #c8ff45); transition: width .28s ease; }
+.analysis-progress small { display: block; margin-top: 9px; color: #61766d; font-size: 8px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .error-banner { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 12px; color: #ffc4c7; border: 1px solid rgba(255,111,118,.28); border-radius: 10px; background: rgba(255,111,118,.08); font-size: 11px; }

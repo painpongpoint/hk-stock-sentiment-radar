@@ -61,6 +61,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [hasRun, setHasRun] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState({ percent: 0, message: '等待開始' });
 
   const metrics = useMemo(() => [
     { label: '最新價格', value: result.market.latestPrice == null ? '未取得' : `HK$ ${result.market.latestPrice.toFixed(2)}`, note: result.market.changePct == null ? result.market.trend : `三日 ${formatSigned(result.market.changePct, '%')}`, up: (result.market.changePct ?? 0) >= 0 },
@@ -78,7 +79,7 @@ export default function Home() {
   const futuCount = hasRun ? (futuApiSource?.count ?? 0) : 0;
   const futuApiState = loading ? 'scraping' : hasRun && futuApiSource?.ok ? 'connected' : hasRun ? 'error' : 'service-ready';
   const futuApiMessage = loading
-    ? `正在向富途官方社區 API 查詢 HK ${code.padStart(5, '0')}…`
+    ? analysisProgress.message
     : hasRun
       ? (futuApiSource?.message ?? '本次沒有收到富途官方 API 資料。')
       : '直接呼叫富途官方 stock_feed API，無需開啟登入頁、安裝連接器或擴充功能。';
@@ -89,11 +90,47 @@ export default function Home() {
     if (!cleaned) { setError('請輸入港股編號，例如 00700。'); return; }
     const normalized = cleaned.padStart(5, '0');
     setCode(normalized); setLoading(true); setError('');
+    setAnalysisProgress({ percent: 2, message: '正在建立分析工作…' });
     try {
-      const response = await fetch(`/api/analyze?code=${encodeURIComponent(normalized)}&mode=${mode}`);
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? '分析暫時失敗。');
-      setResult(payload); setHasRun(true);
+      const response = await fetch(`/api/analyze?code=${encodeURIComponent(normalized)}&mode=${mode}&stream=1`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error ?? '分析暫時失敗。');
+      }
+      if (!response.body) throw new Error('瀏覽器不支援進度串流，請更新瀏覽器後再試。');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let completedResult: AnalysisResult | null = null;
+      const processLine = (line: string) => {
+        if (!line.trim()) return;
+        const message = JSON.parse(line) as {
+          type: 'progress' | 'result' | 'error';
+          percent?: number;
+          message?: string;
+          data?: AnalysisResult;
+        };
+        if (message.type === 'progress') {
+          setAnalysisProgress({ percent: message.percent ?? 0, message: message.message ?? '正在處理…' });
+        } else if (message.type === 'result' && message.data) {
+          completedResult = message.data;
+        } else if (message.type === 'error') {
+          throw new Error(message.message ?? '分析暫時失敗。');
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        lines.forEach(processLine);
+        if (done) break;
+      }
+      processLine(buffer);
+      if (!completedResult) throw new Error('分析完成，但未收到報告資料。');
+      setResult(completedResult); setHasRun(true);
       requestAnimationFrame(() => document.querySelector('#analysis-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '分析暫時失敗，請稍後再試。');
@@ -122,7 +159,7 @@ export default function Home() {
               <h2>直接抓取富途牛牛討論</h2>
               <p>{futuApiMessage}</p>
             </div>
-            <div className="connector-status"><i /><span>{loading ? 'API 抓取中' : hasRun && futuApiSource?.ok ? 'API 正常' : hasRun ? 'API 受限' : 'API 就緒'}</span>{futuCount > 0 && <b>{futuCount} 條</b>}</div>
+            <div className="connector-status"><i /><span>{loading ? '分析處理中' : hasRun && futuApiSource?.ok ? 'API 正常' : hasRun ? 'API 受限' : 'API 就緒'}</span>{loading ? <b>{analysisProgress.percent}%</b> : futuCount > 0 && <b>{futuCount} 條</b>}</div>
           </div>
           <div className="connector-steps">
             <div className={code ? 'done' : ''}><span>1</span><p>輸入港股編號</p></div>
@@ -142,6 +179,11 @@ export default function Home() {
           <label htmlFor="stock-code">港股編號</label>
           <div className="search-controls"><div className="stock-input-wrap"><span>HK</span><Input id="stock-code" name="code" inputMode="numeric" maxLength={5} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} aria-describedby="search-note" /></div><Button type="submit" size="lg" className="analyze-button" disabled={loading}>{loading ? <LoaderCircle className="spin" data-icon="inline-start" /> : <Search data-icon="inline-start" />}{loading ? '正在抓取官方 API…' : '抓取及分析'} <ArrowUpRight data-icon="inline-end" /></Button></div>
           <div className="search-footer" id="search-note"><span>常用：{[['00700', '騰訊'], ['09988', '阿里'], ['01810', '小米']].map(([value, label], index) => <button type="button" onClick={() => setCode(value)} key={value}>{index ? ' · ' : ''}{value} {label}</button>)}</span><span><ShieldCheck size={13} /> 富途官方 API＋其他公開來源</span></div>
+          {loading && <div className="analysis-progress" role="status" aria-live="polite">
+            <div className="analysis-progress-heading"><span><LoaderCircle className="spin" size={15} />{analysisProgress.message}</span><b>{analysisProgress.percent}%</b></div>
+            <Progress value={analysisProgress.percent} aria-label={`分析進度 ${analysisProgress.percent}%`} />
+            <small>近三日 · 富途最多 50 條 · 東方財富最多 4 頁 · 雪球已略過</small>
+          </div>}
           {error && <div className="error-banner" role="alert"><CircleAlert size={16} />{error}<button type="button" onClick={() => runAnalysis(undefined, code, 'demo')}>改看示例</button></div>}
         </form>
 

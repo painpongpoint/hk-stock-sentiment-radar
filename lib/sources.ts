@@ -15,6 +15,13 @@ export type SourceBundle = {
   sources: SourceStatus[];
 };
 
+export type AnalysisProgress = {
+  percent: number;
+  message: string;
+};
+
+type ProgressListener = (progress: AnalysisProgress) => void;
+
 function fetchWithTimeout(url: string, init: RequestInit = {}, timeout = 10_000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
@@ -294,15 +301,27 @@ export function demoBundle(code: string): SourceBundle {
   ] };
 }
 
-export async function liveBundle(code: string): Promise<SourceBundle> {
+export async function liveBundle(code: string, onProgress?: ProgressListener): Promise<SourceBundle> {
   // Keep every configured source except Xueqiu in the live collection. Xueqiu's
   // public endpoint is skipped because its anti-bot response is not usable.
+  let completedSources = 0;
+  const track = async <T,>(label: string, task: Promise<T>) => {
+    const result = await task;
+    completedSources += 1;
+    onProgress?.({
+      percent: 14 + completedSources * 16,
+      message: `${label}已處理（${completedSources}/4）`,
+    });
+    return result;
+  };
+  onProgress?.({ percent: 14, message: '正在並行抓取 4 個資料來源…' });
   const [market, eastmoney, futu, futuCommunity] = await Promise.all([
-    marketSource(code),
-    eastmoneySource(code),
-    futuSource(code),
-    futuCommunitySource(code),
+    track('市場行情', marketSource(code)),
+    track('東方財富股吧', eastmoneySource(code)),
+    track('富途資訊', futuSource(code)),
+    track('富途官方討論', futuCommunitySource(code)),
   ]);
+  onProgress?.({ percent: 84, message: '資料抓取完成，正在整理近三日樣本…' });
   const xueqiuStatus: SourceStatus = {
     key: 'xueqiu', label: '雪球', ok: false, count: 0,
     message: '按目前設定略過：公開接口的反自動化回應無法可靠分析',
